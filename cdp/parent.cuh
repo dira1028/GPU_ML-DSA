@@ -1,11 +1,9 @@
 //빌드 
 
-/*
 //빌드 :
 /*
 sed -i 's/-std=c++14/-std=c++17/' Makefile
 make -j2 CDP=1 ARCH=-arch=sm_87 check
-*/
 */
 
 #pragma once
