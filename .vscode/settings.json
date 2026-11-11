@@ -1,0 +1,20 @@
+{
+    "files.associations": {
+        "*.cu": "cuda-cpp",
+        "*.cuh": "cuda-cpp"
+    },
+    "C_Cpp.intelliSenseEngine": "Tag Parser",
+    "C_Cpp.default.cppStandard": "c++14",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/src/primitives",
+        "${workspaceFolder}/src/common",
+        "${workspaceFolder}/src/parallel",
+        "${workspaceFolder}/tests"
+    ],
+    "C_Cpp.default.browse.path": [
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/bench",
+        "${workspaceFolder}/tests"
+    ],
+    "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": false
+}
