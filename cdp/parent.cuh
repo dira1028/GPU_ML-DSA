@@ -1,8 +1,5 @@
-//빌드 
-
 //빌드 :
 /*
-sed -i 's/-std=c++14/-std=c++17/' Makefile
 make -j2 CDP=1 ARCH=-arch=sm_87 check
 */
 
@@ -66,6 +63,7 @@ __global__ void sign_decide(sgm_ws* w) {
         record(&w->cdp_error,cudaStreamDestroy(stream));
     }
 }
+
 __global__ void sign_attempt(sgm_ws* w) {
     if(blockIdx.x || threadIdx.x || w->cdp_error) return;
     const int par=w->iters&1;
