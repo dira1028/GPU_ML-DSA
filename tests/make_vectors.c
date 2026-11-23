@@ -7,7 +7,6 @@
  * - Sign   : 키 k(= 시드 k 의 키)로 메시지 r 마다 crypto_sign_signature (결정론적: rnd = 0)
  * - Verify : 키 k, 메시지 r 의 서명에 test/verify_cases.h 의 케이스 c 를 적용해 crypto_sign_verify 결과 기록
  */
-#include "params.h"
 #include "sign.h"
 #include "../tests/verify_cases.h"
 #include "../tests/vectors.h"

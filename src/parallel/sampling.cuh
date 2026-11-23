@@ -1,6 +1,5 @@
 #pragma once
 #include <cuda_runtime.h>
-#include "SHA3.cuh"
 #include "polyvec.h"
 
 namespace cdp {

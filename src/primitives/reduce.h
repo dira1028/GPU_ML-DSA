@@ -1,6 +1,5 @@
 #ifndef PQCLEAN_MLDSA87_CLEAN_REDUCE_H
 #define PQCLEAN_MLDSA87_CLEAN_REDUCE_H
-#include "params.h"
 #include <stdint.h>
 
 #define MONT (-4186625) // 2^32 % Q

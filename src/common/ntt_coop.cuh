@@ -6,7 +6,6 @@
 
 #include <cuda_runtime.h>
 #include "params.h"
-#include "reduce.h"
 #include <stdint.h>
 
 #define NTT_COOP_THREADS 128 /* 다항식 1개를 맡는 스레드 수 = 한 레이어의 버터플라이 수 */

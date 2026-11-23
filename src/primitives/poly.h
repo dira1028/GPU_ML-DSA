@@ -24,6 +24,20 @@ __device__ unsigned int PQCLEAN_MLDSA87_CLEAN_poly_make_hint(poly *h, const poly
 __device__ void PQCLEAN_MLDSA87_CLEAN_poly_use_hint(poly *b, const poly *a, const poly *h);
 
 __device__ int PQCLEAN_MLDSA87_CLEAN_poly_chknorm(const poly *a, int32_t B);
+__device__ void PQCLEAN_MLDSA87_CLEAN_poly_uniform(poly *a,
+                                        const uint8_t seed[SEEDBYTES],
+                                        uint16_t nonce);
+
+__device__ void PQCLEAN_MLDSA87_CLEAN_poly_uniform_eta(poly *a,
+        const uint8_t seed[CRHBYTES],
+        uint16_t nonce);
+
+__device__ void PQCLEAN_MLDSA87_CLEAN_poly_uniform_gamma1(poly *a,
+        const uint8_t seed[CRHBYTES],
+        uint16_t nonce);
+
+__device__ void PQCLEAN_MLDSA87_CLEAN_poly_challenge(poly *c, const uint8_t seed[CTILDEBYTES]);
+
 __device__ void PQCLEAN_MLDSA87_CLEAN_polyeta_pack(uint8_t *r, const poly *a);
 __device__ void PQCLEAN_MLDSA87_CLEAN_polyeta_unpack(poly *r, const uint8_t *a);
 

@@ -1,6 +1,17 @@
 #include "sign.cuh"
 
 
+/**************************************************
+ * 이름: sgm_unpack8
+ *
+ * 설명: sk 에서 다항식 tau 의 계수 8g..8g+7 을 풀어 a 에 기록
+ *       tau < L+K 이면 η 다항식 (s1, s2: 3바이트 → 8계수), 그 외는 t0 (13바이트 → 8계수)
+ *
+ * 인수: - sk: 비밀키 바이트열
+ *       - tau: 다항식 번호 (0..L-1: s1, L..L+K-1: s2, L+K..L+2K-1: t0)
+ *       - g: 8계수 묶음 번호 0..31
+ *       - a: 출력 다항식 (공유메모리)
+ **************************************************/
 __device__ void sgm_unpack8(const uint8_t *sk, unsigned int tau, unsigned int g, int32_t *a) {
     const uint8_t *base = sk + 2 * SEEDBYTES + TRBYTES;
     int32_t *r = a + 8 * g;

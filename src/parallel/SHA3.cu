@@ -1,13 +1,4 @@
 ﻿#include "SHA3.cuh"
-#include <algorithm>
-#include <cerrno>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <limits>
-#include <stdexcept>
-#include <vector>
 #include <cuda_runtime.h>
 
 namespace SHA3_CUDA
@@ -34,6 +25,17 @@ namespace SHA3_CUDA
         0, 6, 12, 18, 24, 3, 9, 10, 16, 22, 1, 7, 13,
         19, 20, 4, 5, 11, 17, 23, 2, 8, 14, 15, 21};
 
+    /**************************************************
+     * 이름: rotl64
+     *
+     * 설명: 64비트 값의 왼쪽 n 비트 회전
+     *      n = 0 일 때도 정의되도록 오른쪽 이동량을 (64−n)&63 으로 계산
+     *
+     * 인수: - a: 64비트 lane 값
+     *      - n: 회전량 0..63
+     *
+     * 회전한 값을 반환
+     **************************************************/
     __device__ __forceinline__ Word rotl64(Word a, int n)
     {
         return (a << n) | (a >> ((64 - n) & 63));
@@ -41,6 +43,17 @@ namespace SHA3_CUDA
     struct LaneIndices
     {
         int left, right, s1, s2, s3, s4, chi1, chi2, rho, pi;
+
+        /**************************************************
+         * 이름: LaneIndices::LaneIndices
+         *
+         * 설명: 스레드 t 가 맡는 lane (x, y) = (t%5, t/5) 에 대해 Keccak 라운드에서 필요한
+         *      상대 lane 번호와 회전량의 사전 계산
+         *      left/right: θ 의 열 x−1, x+1 / s1..s4: 같은 열의 다른 4행 /
+         *      chi1, chi2: χ 의 (x+1, y), (x+2, y) / rho: ρ 회전량 / pi: π 에서 값을 가져올 lane
+         *
+         * 인수: - t: lane 번호 0..24 (= threadIdx.x)
+         **************************************************/
         // [GPU 생성자] 라운드에서 사용할 상대 스레드 번호와 회전량을 한 번 계산
         __device__ explicit LaneIndices(int t)
         {
@@ -58,6 +71,16 @@ namespace SHA3_CUDA
         }
     };
 
+    /**************************************************
+     * 이름: keccak_f
+     *
+     * 설명: Keccak-f[1600] 순열 24라운드
+     *       25스레드가 lane 하나씩 레지스터에 들고 __shfl_sync 로 θ (열 패리티), ρ (회전), π (lane 이동),
+     *       χ, ι (라운드 상수, lane 0) 를 계산한 뒤 결과를 s[t] 에 기록
+     *       블록의 25스레드 공동 호출 필수
+     *
+     * 인수: - s: 공유메모리 상태 (lane 25개)
+     **************************************************/
     __device__ __forceinline__ void keccak_f(volatile Word *s)
     {
         const int t = threadIdx.x;
@@ -88,6 +111,15 @@ namespace SHA3_CUDA
         s[t] = a;
     }
 
+    /**************************************************
+     * 이름: keccak_inc_init
+     *
+     * 설명: 증분 SHAKE 상태를 0 으로, pos 를 0 으로 초기화
+     *      25스레드 공동 호출
+     *
+     * 인수: - state: 공유메모리 상태 (lane 25개)
+     *      - pos: 현재 블록 안 바이트 위치
+     **************************************************/
     // [GPU 초기화] shared state[25]와 pos를 초기화한다. 25스레드 공동 호출
     __device__ void keccak_inc_init(Word *state, uint32_t *pos)
     {
@@ -98,6 +130,20 @@ namespace SHA3_CUDA
         __syncthreads();
     }
 
+    /**************************************************
+     * 이름: keccak_inc_absorb
+     *
+     * 설명: 입력 m 을 상태에 흡수
+     *      각 스레드는 자기 lane 이 맡는 바이트 범위 [8t, 8t+8) 와 이번 구간이 겹치는 부분만 XOR
+     *      rate 를 다 채우면 keccak_f 실행
+     *      25스레드 공동 호출
+     *
+     * 인수: - state: 공유메모리 상태
+     *      - rate: 블록 크기 (SHAKE128 168, SHAKE256 136 바이트)
+     *      - m: 입력
+     *      - mlen: 입력 길이
+     *      - pos: 현재 블록 안 바이트 위치 (갱신)
+     **************************************************/
     // [GPU 25-lane 함수] keccak_inc_absorb; 상태/입출력과 길이를 받아 갱신
     __device__ void keccak_inc_absorb(
         Word *state,
@@ -164,6 +210,19 @@ namespace SHA3_CUDA
         }
     }
 
+    /**************************************************
+     * 이름: keccak_inc_finalize
+     *
+     * 설명: 패딩 추가와 흡수 종료
+     *      현재 위치에 도메인 바이트 p, rate 의 마지막 바이트에 0x80 을 XOR 하고,
+     *      다음 squeeze 가 순열부터 실행되도록 pos = rate 로 설정
+     *      스레드 0 이 기록한 뒤 전체 동기화
+     *
+     * 인수: - state: 공유메모리 상태
+     *      - rate: 블록 크기
+     *      - p: 도메인 구분 바이트 (SHAKE 는 0x1F)
+     *      - pos: 현재 블록 안 바이트 위치 (갱신)
+     **************************************************/
     // [GPU 25-lane 함수] keccak_inc_finalize; 상태/입출력과 길이를 받아 갱신한다. 25스레드 공동 호출, 단일 SHAKE 실행에 포함.
     __device__ void keccak_inc_finalize(
         Word *state,
@@ -181,6 +240,19 @@ namespace SHA3_CUDA
         __syncthreads();
     }
 
+    /**************************************************
+     * 이름: keccak_inc_squeeze
+     *
+     * 설명: 출력 outlen 바이트 추출
+     *       pos == rate 이면 keccak_f 로 새 블록을 만들고, 각 스레드는 자기 lane 의 바이트를 h 에 기록
+     *       이어서 호출하면 앞 출력의 다음 바이트부터 출력. 25스레드 공동 호출
+     *
+     * 인수: - h: 출력 버퍼
+     *      - outlen: 출력 길이
+     *      - state: 공유메모리 상태
+     *      - rate: 블록 크기
+     *      - pos: 현재 블록 안 바이트 위치 (갱신)
+     **************************************************/
     // [GPU 병렬 출력] 25스레드가 각 lane의 바이트를 h에 기록한다. 상태/pos를 갱신하며 전체 SHAKE 시간에 포함한다.
     __device__ void keccak_inc_squeeze(
         uint8_t *h,
@@ -248,16 +320,97 @@ namespace SHA3_CUDA
         }
     }
 
+    /**************************************************
+     * 이름: shake128_inc_init
+     *
+     * 설명: SHAKE128 증분 상태 초기화 (keccak_inc_init). 25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태 (공유메모리)
+     **************************************************/
     __device__ void shake128_inc_init(shakeincctx *state) { keccak_inc_init(state->ctx, &state->pos); }
+
+    /**************************************************
+     * 이름: shake128_inc_absorb
+     *
+     * 설명: SHAKE128 (rate 168) 입력 흡수. 25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태
+     *      - input: 입력
+     *      - inlen: 입력 길이
+     **************************************************/
     __device__ void shake128_inc_absorb(shakeincctx *state, const uint8_t *input, size_t inlen) { keccak_inc_absorb(state->ctx, SHAKE128_BLOCK_BYTES, input, inlen, &state->pos); }
+
+    /**************************************************
+     * 이름: shake128_inc_finalize
+     *
+     * 설명: SHAKE128 패딩 (0x1F … 0x80) 추가와 흡수 종료. 25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태
+     **************************************************/
     __device__ void shake128_inc_finalize(shakeincctx *state) { keccak_inc_finalize(state->ctx, SHAKE128_BLOCK_BYTES, 0x1F, &state->pos); }
+
+    /**************************************************
+     * 이름: shake128_inc_squeeze
+     *
+     * 설명: SHAKE128 출력 outlen 바이트 생성. 25스레드 공동 호출
+     *
+     * 인수: - output: 출력 버퍼
+     *      - outlen: 출력 길이
+     *      - state: SHAKE 상태
+     **************************************************/
     __device__ void shake128_inc_squeeze(uint8_t *output, size_t outlen, shakeincctx *state) { keccak_inc_squeeze(output, outlen, state->ctx, SHAKE128_BLOCK_BYTES, &state->pos); }
 
+    /**************************************************
+     * 이름: shake256_inc_init
+     *
+     * 설명: SHAKE256 증분 상태 초기화 (keccak_inc_init). 25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태 (공유메모리)
+     **************************************************/
     __device__ void shake256_inc_init(shakeincctx *state) { keccak_inc_init(state->ctx, &state->pos); }
+
+    /**************************************************
+     * 이름: shake256_inc_absorb
+     *
+     * 설명: SHAKE256 (rate 136) 입력 흡수. 25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태
+     *      - input: 입력
+     *      - inlen: 입력 길이
+     **************************************************/
     __device__ void shake256_inc_absorb(shakeincctx *state, const uint8_t *input, size_t inlen) { keccak_inc_absorb(state->ctx, SHAKE256_BLOCK_BYTES, input, inlen, &state->pos); }
+
+    /**************************************************
+     * 이름: shake256_inc_finalize
+     *
+     * 설명: SHAKE256 패딩 (0x1F … 0x80) 추가와 흡수 종료. 25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태
+     **************************************************/
     __device__ void shake256_inc_finalize(shakeincctx *state) { keccak_inc_finalize(state->ctx, SHAKE256_BLOCK_BYTES, 0x1F, &state->pos); }
+
+    /**************************************************
+     * 이름: shake256_inc_squeeze
+     *
+     * 설명: SHAKE256 출력 outlen 바이트 생성. 25스레드 공동 호출
+     *
+     * 인수: - output: 출력 버퍼
+     *      - outlen: 출력 길이
+     *      - state: SHAKE 상태
+     **************************************************/
     __device__ void shake256_inc_squeeze(uint8_t *output, size_t outlen, shakeincctx *state) { keccak_inc_squeeze(output, outlen, state->ctx, SHAKE256_BLOCK_BYTES, &state->pos); }
 
+    /**************************************************
+     * 이름: lane25_stream128_init
+     *
+     * 설명: ExpandA 용 SHAKE128 스트림 시작
+     *      seed ‖ nonce 하위 바이트 ‖ 상위 바이트 흡수 후 finalize
+     *      25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태
+     *      - seed: ρ (32바이트)
+     *      - nonce: (행 << 8) + 열
+     **************************************************/
     __device__ void lane25_stream128_init(shakeincctx *state, const uint8_t seed[SEEDBYTES], uint16_t nonce)
     {
         uint8_t t[2];
@@ -270,6 +423,15 @@ namespace SHA3_CUDA
         shake128_inc_finalize(state);
     }
 
+    /**************************************************
+     * 이름: lane25_stream128_squeezeblocks
+     *
+     * 설명: SHAKE128 블록 (168바이트) outblocks 개 출력. 25스레드 공동 호출
+     *
+     * 인수: - output: 출력 버퍼 (168·outblocks 바이트)
+     *      - outblocks: 블록 수
+     *      - state: SHAKE 상태
+     **************************************************/
     __device__ void lane25_stream128_squeezeblocks(uint8_t *output, size_t outblocks, shakeincctx *state)
     {
         shake128_inc_squeeze(output, outblocks * SHAKE128_BLOCK_BYTES, state);
@@ -279,6 +441,17 @@ namespace SHA3_CUDA
     {
     }
 
+    /**************************************************
+     * 이름: lane25_stream256_init
+     *
+     * 설명: ExpandS / ExpandMask 용 SHAKE256 스트림 시작
+     *       seed ‖ nonce (2바이트, 하위 바이트 먼저) 흡수 후 finalize
+     *       25스레드 공동 호출
+     *
+     * 인수: - state: SHAKE 상태
+     *      - seed: ρ' 또는 ρ'' (64바이트)
+     *      - nonce: ExpandS 는 다항식 번호, ExpandMask 는 L·nonce + l
+     **************************************************/
     __device__ void lane25_stream256_init(shakeincctx *state, const uint8_t seed[CRHBYTES], uint16_t nonce)
     {
         uint8_t t[2];
@@ -291,6 +464,15 @@ namespace SHA3_CUDA
         shake256_inc_finalize(state);
     }
 
+    /**************************************************
+     * 이름: lane25_stream256_squeezeblocks
+     *
+     * 설명: SHAKE256 블록 (136바이트) outblocks 개 출력. 25스레드 공동 호출
+     *
+     * 인수: - output: 출력 버퍼 (136·outblocks 바이트)
+     *      - outblocks: 블록 수
+     *      - state: SHAKE 상태
+     **************************************************/
     __device__ void lane25_stream256_squeezeblocks(uint8_t *output, size_t outblocks, shakeincctx *state)
     {
         shake256_inc_squeeze(output, outblocks * SHAKE256_BLOCK_BYTES, state);
